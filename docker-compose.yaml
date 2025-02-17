@@ -1,0 +1,15 @@
+services:
+  bitcoind:
+    build: .  # Build from the Dockerfile in the same directory
+    ports:
+      - "8332:8332" # Expose the port (for local access only - see security section)
+    volumes:
+      - bitcoin_data:/data # Mount a volume for the data directory
+    restart: unless-stopped # Restart unless explicitly stopped
+    # Add RPC credentials (INSECURE - see security section)
+    # environment:
+    #   RPCUSER: your_username
+    #   RPCPASSWORD: your_password
+
+volumes:
+  bitcoin_data: # Named volume to persist data
