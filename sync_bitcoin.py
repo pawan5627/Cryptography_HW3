@@ -2,6 +2,7 @@ import modal
 import json
 import os
 import subprocess
+import time
 
 app = modal.App("sync-bitcoin")
 volume = modal.Volume.from_name("bitcoin-data")
@@ -13,25 +14,25 @@ dockerfile_image = (
 @app.function(volumes={"/mnt/data/bitcoin-unique": volume}, image=dockerfile_image)
 def run_bitcoind():
     try:
-        # Change permission to override files in /mnt/data/bitcoin-unique
         subprocess.run(["chmod", "-R", "u+w", "/mnt/data/bitcoin-unique"], check=True)
         print("Permissions updated for /mnt/data/bitcoin-unique")
 
-        # Start bitcoind
-        bitcoind_process = subprocess.Popen(["bitcoind", "-datadir=/mnt/data/bitcoin-unique"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        bitcoind_process = subprocess.Popen(
+            ["bitcoind", "-datadir=/mnt/data/bitcoin-unique"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
         print("bitcoind process started.")
 
-        # Log stdout and stderr
-        while True:
-            out = bitcoind_process.stdout.readline()
-            if out == '' and bitcoind_process.poll() is not None:
-                break
-            if out:
-                print(f"STDOUT: {out.strip()}")
-        while True:
-            err = bitcoind_process.stderr.readline()
-            if err:
-                print(f"STDERR: {err.strip()}")
+        # Keep reading logs so that the function doesn't exit
+        for line in iter(bitcoind_process.stdout.readline, b''):
+            print(f"STDOUT: {line.decode().strip()}")
+        
+        for line in iter(bitcoind_process.stderr.readline, b''):
+            print(f"STDERR: {line.decode().strip()}")
+
+        bitcoind_process.wait()  # Wait indefinitely for bitcoind to exit
+
     except Exception as e:
         print(f"Error running bitcoind: {e}")
 
@@ -52,12 +53,24 @@ def getblock(block_hash: str):
 @app.local_entrypoint()
 def main():
     try:
+        # Start bitcoind in detached mode
         run_bitcoind.remote()
         print("bitcoind started in detached mode.")
-        # Example: getblock call after setting up a tunnel (you can uncomment and use when needed)
-        # import time
-        # time.sleep(10)  # Wait for bitcoind to be fully started
-        # block_info = getblock("0000000000000000000d3bd4b2e5f29dc43f1ff9c3d8adbc0c0d08de4d042b4a")
-        # print(block_info)
+
+        # Check bitcoind status
+        while True:
+            try:
+                getblock.remote("0000000000000000000000000000000000000000000000000000000000000000")  # Genesis block
+                print("bitcoind is ready!")
+                break
+            except Exception:
+                print("bitcoind not yet ready, retrying...")
+                time.sleep(10)
+
+        # Keep the app running
+        while True:
+            print("Modal app running... checking sync progress.")
+            time.sleep(300)  # Print status every 5 minutes
+
     except Exception as e:
         print(f"Error in main function: {e}")
